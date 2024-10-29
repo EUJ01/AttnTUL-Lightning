@@ -1,9 +1,10 @@
 import math
+
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-from torch.nn.parameter import Parameter
 from torch.nn.modules.module import Module
+from torch.nn.parameter import Parameter
 
 
 class GraphConvolution(Module):
@@ -28,11 +29,11 @@ class GraphConvolution(Module):
         if bias:
             self.bias = Parameter(torch.FloatTensor(out_features))
         else:
-            self.register_parameter('bias', None)
+            self.register_parameter("bias", None)
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.weight.size(1))
+        stdv = 1.0 / math.sqrt(self.weight.size(1))
         self.weight.data.uniform_(-stdv, stdv)
         if self.bias is not None:
             self.bias.data.uniform_(-stdv, stdv)
@@ -55,9 +56,14 @@ class GraphConvolution(Module):
             return output
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + str(self.in_features) + ' -> ' \
-            + str(self.out_features) + ')'
+        return (
+            self.__class__.__name__
+            + " ("
+            + str(self.in_features)
+            + " -> "
+            + str(self.out_features)
+            + ")"
+        )
 
 
 class PositionalEncoding(nn.Module):
@@ -79,13 +85,17 @@ class PositionalEncoding(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(
-            0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
+        )
         pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos((position * div_term)[:, :-1]
-                                ) if d_model % 2 else torch.cos(position * div_term)
+        pe[:, 1::2] = (
+            torch.cos((position * div_term)[:, :-1])
+            if d_model % 2
+            else torch.cos(position * div_term)
+        )
         pe = pe.unsqueeze(1)
-        self.register_buffer('pe', pe)
+        self.register_buffer("pe", pe)
 
     def forward(self, x):
         """[summary]
@@ -96,7 +106,7 @@ class PositionalEncoding(nn.Module):
         Returns:
             [type]: [description]
         """
-        x = x + self.pe[:x.size(0), :, :]
+        x = x + self.pe[: x.size(0), :, :]
         return self.dropout(x)
 
 
@@ -140,7 +150,8 @@ class ScaledDotProductAttention(nn.Module):
             [type]: [description]
         """
         scores = torch.matmul(Q, K.transpose(-1, -2)) / np.sqrt(
-            self.d_k)  # scores : [batch_size, n_heads, seq_len, seq_len]
+            self.d_k
+        )  # scores : [batch_size, n_heads, seq_len, seq_len]
         # Fills elements of self tensor with value where mask is one.
         scores.masked_fill_(attn_mask, -1e9)
         attn = nn.Softmax(dim=-1)(scores)
@@ -178,16 +189,16 @@ class MultiHeadAttention(nn.Module):
             [type]: [description]
         """
         residual, batch_size = Q, Q.size(0)
-        q_s = self.W_Q(Q).view(batch_size, -1, self.n_heads,
-                               self.d_k).transpose(1, 2)
-        k_s = self.W_K(K).view(batch_size, -1, self.n_heads,
-                               self.d_k).transpose(1, 2)
-        v_s = self.W_V(V).view(batch_size, -1, self.n_heads,
-                               self.d_v).transpose(1, 2)
+        q_s = self.W_Q(Q).view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2)
+        k_s = self.W_K(K).view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2)
+        v_s = self.W_V(V).view(batch_size, -1, self.n_heads, self.d_v).transpose(1, 2)
         attn_mask = attn_mask.unsqueeze(1).repeat(1, self.n_heads, 1, 1)
         context = self.scadot(q_s, k_s, v_s, attn_mask)
-        context = context.transpose(1, 2).contiguous().view(
-            batch_size, -1, self.n_heads * self.d_v)
+        context = (
+            context.transpose(1, 2)
+            .contiguous()
+            .view(batch_size, -1, self.n_heads * self.d_v)
+        )
         output = self.fc(context)
         return self.norm(output + residual)
 
@@ -208,9 +219,7 @@ class PoswiseFeedForwardNet(nn.Module):
         """
         super(PoswiseFeedForwardNet, self).__init__()
         self.fc = nn.Sequential(
-            nn.Linear(d_model, d_ff),
-            nn.GELU(),
-            nn.Linear(d_ff, d_model)
+            nn.Linear(d_model, d_ff), nn.GELU(), nn.Linear(d_ff, d_model)
         )
         self.norm = nn.LayerNorm(d_model)
 
@@ -260,7 +269,8 @@ class EncoderLayer(nn.Module):
             [type]: [description]
         """
         enc_outputs = self.enc_self_attn(
-            enc_inputs, enc_inputs, enc_inputs, enc_self_attn_mask)
+            enc_inputs, enc_inputs, enc_inputs, enc_self_attn_mask
+        )
         enc_outputs = self.pos_ffn(enc_outputs)
         return enc_outputs
 
@@ -297,13 +307,17 @@ class complexSparsemax(nn.Module):
         input = input.transpose(0, 1)
         dim = 1
         number_of_logits = input.size(dim)
-        input = input - torch.max(input, dim=dim,
-                                  keepdim=True)[0].expand_as(input)
+        input = input - torch.max(input, dim=dim, keepdim=True)[0].expand_as(input)
 
         # Sort input in descending order.
         zs = torch.sort(input=input, dim=dim, descending=True)[0]
-        range = torch.arange(start=1, end=number_of_logits + 1, step=1,
-                             device=torch.device('cuda'), dtype=input.dtype).view(1, -1)
+        range = torch.arange(
+            start=1,
+            end=number_of_logits + 1,
+            step=1,
+            device=torch.device("cuda"),
+            dtype=input.dtype,
+        ).view(1, -1)
         range = range.expand_as(zs)
 
         # Determine sparsity of projection
@@ -342,8 +356,7 @@ class complexSparsemax(nn.Module):
         dim = 1
 
         nonzeros = torch.ne(self.output, 0)
-        sum = torch.sum(grad_output * nonzeros, dim=dim) / \
-            torch.sum(nonzeros, dim=dim)
+        sum = torch.sum(grad_output * nonzeros, dim=dim) / torch.sum(nonzeros, dim=dim)
         self.grad_input = nonzeros * (grad_output - sum.expand_as(grad_output))
 
         return self.grad_input

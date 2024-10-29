@@ -1,12 +1,14 @@
-import torch
+import os
+import pickle
+from math import asin, cos, radians, sin, sqrt
+
+import networkx as nx
 import numpy as np
 import pandas as pd
-import networkx as nx
 import scipy.sparse as sp
+import torch
 from tqdm import tqdm
-from math import radians, cos, sin, asin, sqrt
-import pickle
-import os
+
 
 def haversine_distance(lon1, lat1, lon2, lat2):
     """[This function is used to calculate the distance between two GPS points (unit: meter)]
@@ -20,8 +22,15 @@ def haversine_distance(lon1, lat1, lon2, lat2):
     Returns:
         [type]: [Distance between two points]
     """
-    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])  # Convert decimal degrees to radians
-    c = 2 * asin(sqrt(sin((lat2 - lat1)/2)**2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1)/2)**2))  # Haversine formula
+    lon1, lat1, lon2, lat2 = map(
+        radians, [lon1, lat1, lon2, lat2]
+    )  # Convert decimal degrees to radians
+    c = 2 * asin(
+        sqrt(
+            sin((lat2 - lat1) / 2) ** 2
+            + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
+        )
+    )  # Haversine formula
     r = 6371.393  # Average radius of the earth in kilometers
     return c * r * 1000
 
@@ -36,10 +45,10 @@ def conut_gird_num(tracks_data, grid_distance):
     Returns:
         [type]: [description]
     """
-    Lon1 = tracks_data['Lon'].min()
-    Lat1 = tracks_data['Lat'].min()
-    Lon2 = tracks_data['Lon'].max()
-    Lat2 = tracks_data['Lat'].max()
+    Lon1 = tracks_data["Lon"].min()
+    Lat1 = tracks_data["Lat"].min()
+    Lon2 = tracks_data["Lon"].max()
+    Lat2 = tracks_data["Lat"].max()
     low = haversine_distance(Lon1, Lat1, Lon2, Lat1)
     high = haversine_distance(Lon1, Lat2, Lon2, Lat2)
     left = haversine_distance(Lon1, Lat1, Lon1, Lat2)
@@ -48,7 +57,15 @@ def conut_gird_num(tracks_data, grid_distance):
     lat_grid_num = int((left + right) / 2 / grid_distance)
     # logger.info("After division, the whole map is:", lon_grid_num, '*',
     #       lat_grid_num, '=', lon_grid_num * lat_grid_num, 'grids')
-    print("After division, the whole map is:", lon_grid_num, '*', lat_grid_num, '=', lon_grid_num * lat_grid_num, 'grids')
+    print(
+        "After division, the whole map is:",
+        lon_grid_num,
+        "*",
+        lat_grid_num,
+        "=",
+        lon_grid_num * lat_grid_num,
+        "grids",
+    )
     return lon_grid_num, lat_grid_num, Lon1, Lat1, Lon2, Lat2
 
 
@@ -62,18 +79,27 @@ def grid_process(tracks_data, grid_distance):
     Returns:
         [type]: [description]
     """
-    lon_grid_num, lat_grid_num, Lon1, Lat1, Lon2, Lat2 = conut_gird_num(tracks_data, grid_distance)
+    lon_grid_num, lat_grid_num, Lon1, Lat1, Lon2, Lat2 = conut_gird_num(
+        tracks_data, grid_distance
+    )
 
-    Lon_gap = (Lon2 - Lon1)/lon_grid_num
-    Lat_gap = (Lat2 - Lat1)/lat_grid_num
+    Lon_gap = (Lon2 - Lon1) / lon_grid_num
+    Lat_gap = (Lat2 - Lat1) / lat_grid_num
     # Get the two-dimensional matrix coordinate index and convert it to one-dimensional ID
-    tracks_data['grid_ID'] = tracks_data.apply(lambda x: int((x['Lat']-Lat1)/Lat_gap) * lon_grid_num + int((x['Lon']-Lon1)/Lon_gap) + 1, axis=1)
+    tracks_data["grid_ID"] = tracks_data.apply(
+        lambda x: int((x["Lat"] - Lat1) / Lat_gap) * lon_grid_num
+        + int((x["Lon"] - Lon1) / Lon_gap)
+        + 1,
+        axis=1,
+    )
 
-    grid_list = sorted(set(tracks_data['grid_ID']))
-    tracks_data['grid_ID'] = [grid_list.index(num) for num in tqdm(tracks_data['grid_ID'])]
-    grid_list = sorted(set(tracks_data['grid_ID']))
+    grid_list = sorted(set(tracks_data["grid_ID"]))
+    tracks_data["grid_ID"] = [
+        grid_list.index(num) for num in tqdm(tracks_data["grid_ID"])
+    ]
+    grid_list = sorted(set(tracks_data["grid_ID"]))
     # logger.info('After removing the invalid grid, there are', len(grid_list), 'grids')
-    print('After removing the invalid grid, there are', len(grid_list), 'grids')
+    print("After removing the invalid grid, there are", len(grid_list), "grids")
     return tracks_data, grid_list
 
 
@@ -87,35 +113,52 @@ def generate_dataset(tracks_data, split_ratio):
     Returns:
         [type]: [Track list, user list, data set, training set and test set, number of test sets]
     """
-    user_list = tracks_data['ObjectID'].drop_duplicates().values.tolist()
+    user_list = tracks_data["ObjectID"].drop_duplicates().values.tolist()
     user_traj_dict = {key: [] for key in user_list}
 
-    for user_id in tqdm(tracks_data['ObjectID'].drop_duplicates().values.tolist()):
+    for user_id in tqdm(tracks_data["ObjectID"].drop_duplicates().values.tolist()):
         one_user_data = tracks_data.loc[tracks_data.ObjectID == user_id, :]
-        for traj_id in one_user_data['TrajNumber'].drop_duplicates().values.tolist():
+        for traj_id in one_user_data["TrajNumber"].drop_duplicates().values.tolist():
+            one_traj_data = one_user_data.loc[
+                tracks_data.TrajNumber == traj_id, "grid_ID"
+            ].values.tolist()
 
-            one_traj_data = one_user_data.loc[tracks_data.TrajNumber == traj_id, 'grid_ID'].values.tolist()
+            one_time_data = one_user_data.loc[
+                tracks_data.TrajNumber == traj_id, "time"
+            ].values.tolist()
 
-            one_time_data = one_user_data.loc[tracks_data.TrajNumber == traj_id, 'time'].values.tolist()
+            one_state_data = one_user_data.loc[
+                tracks_data.TrajNumber == traj_id, "state"
+            ].values.tolist()
 
-            one_state_data = one_user_data.loc[tracks_data.TrajNumber == traj_id, 'state'].values.tolist()
+            user_traj_dict[user_id].append(
+                (traj_id, one_traj_data, one_time_data, one_state_data)
+            )
 
-            user_traj_dict[user_id].append((traj_id, one_traj_data, one_time_data, one_state_data))
-
-    traj_list = list(range(traj_id+1))
+    traj_list = list(range(traj_id + 1))
 
     test_nums = 0
-    user_traj_train, user_traj_test = {key: [] for key in user_list}, {key: [] for key in user_list}
+    user_traj_train, user_traj_test = (
+        {key: [] for key in user_list},
+        {key: [] for key in user_list},
+    )
 
     for key in user_traj_dict:
         traj_num = len(user_traj_dict[key])
-        test_nums += traj_num - int(traj_num*split_ratio)
-        for idx in list(range(traj_num))[:int(traj_num*split_ratio)]:
+        test_nums += traj_num - int(traj_num * split_ratio)
+        for idx in list(range(traj_num))[: int(traj_num * split_ratio)]:
             user_traj_train[key].append(user_traj_dict[key][idx])
-        for idx in list(range(traj_num))[int(traj_num*split_ratio):]:
+        for idx in list(range(traj_num))[int(traj_num * split_ratio) :]:
             user_traj_test[key].append(user_traj_dict[key][idx])
 
-    return traj_list, user_list, user_traj_dict, user_traj_train, user_traj_test, test_nums
+    return (
+        traj_list,
+        user_list,
+        user_traj_dict,
+        user_traj_train,
+        user_traj_test,
+        test_nums,
+    )
 
 
 def preprocess_adj(adj):
@@ -143,7 +186,7 @@ def normalize_adj(adj):
     adj = sp.coo_matrix(adj)
     rowsum = np.array(adj.sum(1))  # D
     d_inv_sqrt = np.power(rowsum, -0.5).flatten()  # D^-0.5
-    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.
+    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.0
     d_mat_inv_sqrt = sp.diags(d_inv_sqrt)  # D^-0.5
     # D^-0.5AD^0.5
     return adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt).tocoo()
@@ -159,10 +202,13 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
         [type]: [sparse matrix]
     """
     sparse_mx = sparse_mx.tocoo().astype(np.float32)
-    indices = torch.from_numpy(np.vstack((sparse_mx.row, sparse_mx.col)).astype(np.int64))
+    indices = torch.from_numpy(
+        np.vstack((sparse_mx.row, sparse_mx.col)).astype(np.int64)
+    )
     values = torch.from_numpy(sparse_mx.data)
     shape = torch.Size(sparse_mx.shape)
-    return torch.sparse.FloatTensor(indices, values, shape)
+    # return torch.sparse.FloatTensor(indices, values, shape) # Deprecated
+    return torch.sparse_coo_tensor(indices, values, shape, dtype=torch.float32)
 
 
 def generate_graph(grid_list, traj_list, user_list, user_traj_dict, user_traj_train):
@@ -187,22 +233,23 @@ def generate_graph(grid_list, traj_list, user_list, user_traj_dict, user_traj_tr
         for one_traj in user_traj_dict[key]:
             one_traj_list = one_traj[1]
             for idx in range(1, len(one_traj_list)):
-                node1, node2 = sorted([one_traj_list[idx-1], one_traj_list[idx]])
+                node1, node2 = sorted([one_traj_list[idx - 1], one_traj_list[idx]])
                 if node1 != node2:
-                    edge = str(node1) + ' ' + str(node2)
+                    edge = str(node1) + " " + str(node2)
                     if edge not in local_edge_dict:
                         local_edge_dict[edge] = 1
                     else:
                         local_edge_dict[edge] += 1
 
     for key in local_edge_dict:
-        local_edge_list.append(list(map(int, key.split()))+[local_edge_dict[key]])
+        local_edge_list.append(list(map(int, key.split())) + [local_edge_dict[key]])
     local_graph.add_weighted_edges_from(local_edge_list)
 
-    local_adj = sparse_mx_to_torch_sparse_tensor(preprocess_adj(nx.to_scipy_sparse_array(local_graph, dtype=np.float64)))
+    local_adj = sparse_mx_to_torch_sparse_tensor(
+        preprocess_adj(nx.to_scipy_sparse_array(local_graph, dtype=np.float64))
+    )
 
-
-    global_feature = np.zeros((len(traj_list)+len(user_list), len(grid_list)))
+    global_feature = np.zeros((len(traj_list) + len(user_list), len(grid_list)))
 
     for key in user_traj_dict:
         sum_feature = np.zeros((1, len(grid_list)))
@@ -210,19 +257,20 @@ def generate_graph(grid_list, traj_list, user_list, user_traj_dict, user_traj_tr
             for idx in one_traj[1]:
                 global_feature[one_traj[0], idx] += 1
             sum_feature += global_feature[one_traj[0]]
-        global_feature[len(traj_list)+key] = sum_feature
+        global_feature[len(traj_list) + key] = sum_feature
 
     # logger.info('Waiting to build global graph:')
-    print('Waiting to build global graph:')
+    print("Waiting to build global graph:")
     global_graph = nx.Graph()
-    global_graph.add_nodes_from(traj_list + [len(traj_list)+idx for idx in user_list])
-    #trajectory node values are given from tarj_list, so user nodes values start after last traj list index
-
+    global_graph.add_nodes_from(traj_list + [len(traj_list) + idx for idx in user_list])
+    # trajectory node values are given from tarj_list, so user nodes values start after last traj list index
 
     global_edge_list, edge_weight_max = [], 0
-    for node1 in tqdm(range(len(traj_list)-1)):
-        node2_list = [idx for idx in range(node1+1, len(traj_list))]
-        edge_weight_list = np.sum(np.minimum(global_feature[node1], global_feature[node2_list]), axis=1)
+    for node1 in tqdm(range(len(traj_list) - 1)):
+        node2_list = [idx for idx in range(node1 + 1, len(traj_list))]
+        edge_weight_list = np.sum(
+            np.minimum(global_feature[node1], global_feature[node2_list]), axis=1
+        )
         edge_weight_max = max(edge_weight_list.max(), edge_weight_max)
         for node2, edge_weight in zip(node2_list, edge_weight_list):
             if edge_weight:
@@ -235,39 +283,105 @@ def generate_graph(grid_list, traj_list, user_list, user_traj_dict, user_traj_tr
             global_edge_list.append([node1, node2, edge_weight_max])
 
     global_graph.add_weighted_edges_from(global_edge_list)
-    global_adj = sparse_mx_to_torch_sparse_tensor(preprocess_adj(nx.to_scipy_sparse_array(global_graph, dtype=np.float64)))
+    global_adj = sparse_mx_to_torch_sparse_tensor(
+        preprocess_adj(nx.to_scipy_sparse_array(global_graph, dtype=np.float64))
+    )
 
-    return torch.FloatTensor(local_feature), local_adj, torch.FloatTensor(global_feature), global_adj, local_graph, global_graph
+    return (
+        torch.FloatTensor(local_feature),
+        local_adj,
+        torch.FloatTensor(global_feature),
+        global_adj,
+        local_graph,
+        global_graph,
+    )
+
 
 def get_data_and_graph(raw_path, read_pkl, grid_size):
-
-    process_path = raw_path.replace('.csv', f'-{grid_size}.pkl')
+    process_path = raw_path.replace(".csv", f"-{grid_size}.pkl")
     # If read_pkl is True, load the data from the pickle file
     if read_pkl is True and os.path.exists(process_path):
-        with open(process_path, 'rb') as f:
-            
-            local_feature, local_adj, global_feature, global_adj, user_traj_train, user_traj_test, grid_nums, traj_nums, user_nums, test_nums, local_graph, global_graph = pickle.load(f)
-            
-        return local_feature, local_adj, global_feature, global_adj, user_traj_train, user_traj_test, grid_nums, traj_nums, user_nums, test_nums, local_graph, global_graph 
-    
-     
+        with open(process_path, "rb") as f:
+            (
+                local_feature,
+                local_adj,
+                global_feature,
+                global_adj,
+                user_traj_train,
+                user_traj_test,
+                grid_nums,
+                traj_nums,
+                user_nums,
+                test_nums,
+                local_graph,
+                global_graph,
+            ) = pickle.load(f)
+
+        return (
+            local_feature,
+            local_adj,
+            global_feature,
+            global_adj,
+            user_traj_train,
+            user_traj_test,
+            grid_nums,
+            traj_nums,
+            user_nums,
+            test_nums,
+            local_graph,
+            global_graph,
+        )
+
     # If read_pkl is False, process the data
     grid_distance = grid_size
     split_ratio = 0.6
 
     # Read the raw data and perform preprocessing
-    tracks_data = pd.read_csv(raw_path, sep='\t')
+    tracks_data = pd.read_csv(raw_path, sep="\t")
     tracks_data, grid_list = grid_process(tracks_data, grid_distance)
-    
-    traj_list, user_list, user_traj_dict, user_traj_train, user_traj_test, test_nums = generate_dataset(tracks_data, split_ratio)
-    
-    local_feature, local_adj, global_feature, global_adj, local_graph, global_graph = generate_graph(grid_list, traj_list, user_list, user_traj_dict, user_traj_train)
-    
+
+    traj_list, user_list, user_traj_dict, user_traj_train, user_traj_test, test_nums = (
+        generate_dataset(tracks_data, split_ratio)
+    )
+
+    local_feature, local_adj, global_feature, global_adj, local_graph, global_graph = (
+        generate_graph(grid_list, traj_list, user_list, user_traj_dict, user_traj_train)
+    )
+
     grid_nums, traj_nums, user_nums = len(grid_list), len(traj_list), len(user_list)
 
     # Save the processed data to a pickle file for future use
-    with open(process_path, 'wb') as f:
-        pickle.dump((local_feature, local_adj, global_feature, global_adj, user_traj_train, user_traj_test, grid_nums, traj_nums, user_nums, test_nums, local_graph, global_graph), f)
+    with open(process_path, "wb") as f:
+        pickle.dump(
+            (
+                local_feature,
+                local_adj,
+                global_feature,
+                global_adj,
+                user_traj_train,
+                user_traj_test,
+                grid_nums,
+                traj_nums,
+                user_nums,
+                test_nums,
+                local_graph,
+                global_graph,
+            ),
+            f,
+        )
 
     # Return the processed data
-    return (local_feature, local_adj, global_feature, global_adj, user_traj_train, user_traj_test, grid_nums, traj_nums, user_nums, test_nums, local_graph, global_graph)
+    return (
+        local_feature,
+        local_adj,
+        global_feature,
+        global_adj,
+        user_traj_train,
+        user_traj_test,
+        grid_nums,
+        traj_nums,
+        user_nums,
+        test_nums,
+        local_graph,
+        global_graph,
+    )
